@@ -271,34 +271,23 @@ class Chef
         node_name = get_node_name(config[:chef_node_name])
 
         # this really should be caught in Fog
-        if locate_config_value(:user_data).nil?
-          server_def = {
-            :name => node_name,
-            :image_ref => locate_config_value(:image),
-            :flavor_ref => locate_config_value(:flavor),
-            :security_groups => locate_config_value(:security_groups),
-            :availability_zone => locate_config_value(:availability_zone),
-            :key_name => locate_config_value(:openstack_ssh_key_id),
-            :nics => locate_config_value(:network_ids).map do |nic|
-              nic_id = { 'net_id' => nic }
-              nic_id
-            end
-          }
-        else
-          server_def = {
-            :name => node_name,
-            :image_ref => locate_config_value(:image),
-            :flavor_ref => locate_config_value(:flavor),
-            :security_groups => locate_config_value(:security_groups),
-            :availability_zone => locate_config_value(:availability_zone),
-            :key_name => locate_config_value(:openstack_ssh_key_id),
-            :user_data => locate_config_value(:user_data),
-            :nics => locate_config_value(:network_ids).map do |nic|
-              nic_id = { 'net_id' => nic }
-              nic_id
-            end
-          }
+        # but until then let's at least make it less ugly
+        server_def = {
+          :name => node_name,
+          :image_ref => locate_config_value(:image),
+          :flavor_ref => locate_config_value(:flavor),
+          :security_groups => locate_config_value(:security_groups),
+          :availability_zone => locate_config_value(:availability_zone),
+          :key_name => locate_config_value(:openstack_ssh_key_id)
+        }
+        server_def[:user_data] = locate_config_value(:user_data) unless locate_config_value(:user_data).nil?
+        unless locate_config_value(:network_ids).nil?
+          server_def[:nics] = locate_config_value(:network_ids).map do |nic|
+            nic_id = { 'net_id' => nic }
+            nic_id
+          end
         end
+        Chef::Log.debug("server_def is: #{server_def}")
 
         Chef::Log.debug("Name #{node_name}")
         Chef::Log.debug("Availability Zone #{locate_config_value(:availability_zone)}")
