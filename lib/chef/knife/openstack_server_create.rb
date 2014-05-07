@@ -271,34 +271,26 @@ class Chef
         node_name = get_node_name(config[:chef_node_name])
 
         # this really should be caught in Fog
-        if locate_config_value(:user_data).nil?
-          server_def = {
-            :name => node_name,
-            :image_ref => locate_config_value(:image),
-            :flavor_ref => locate_config_value(:flavor),
-            :security_groups => locate_config_value(:security_groups),
-            :availability_zone => locate_config_value(:availability_zone),
-            :key_name => locate_config_value(:openstack_ssh_key_id),
-            :nics => locate_config_value(:network_ids).map do |nic|
-              nic_id = { 'net_id' => nic }
-              nic_id
-            end
-          }
+        # but until then let's at least make it less ugly
+        server_def = {
+          :name => node_name,
+          :image_ref => locate_config_value(:image),
+          :flavor_ref => locate_config_value(:flavor),
+          :security_groups => locate_config_value(:security_groups),
+          :availability_zone => locate_config_value(:availability_zone),
+          :key_name => locate_config_value(:openstack_ssh_key_id)
+        }
+        server_def[:user_data] = locate_config_value(:user_data) unless locate_config_value(:user_data).nil?
+        if locate_config_value(:network_ids).nil? 
+          private_nic = {:net_id => private_network['id']} unless private_network.nil?
+          server_def[:nics] = [private_nic] unless private_nic.nil?
         else
-          server_def = {
-            :name => node_name,
-            :image_ref => locate_config_value(:image),
-            :flavor_ref => locate_config_value(:flavor),
-            :security_groups => locate_config_value(:security_groups),
-            :availability_zone => locate_config_value(:availability_zone),
-            :key_name => locate_config_value(:openstack_ssh_key_id),
-            :user_data => locate_config_value(:user_data),
-            :nics => locate_config_value(:network_ids).map do |nic|
-              nic_id = { 'net_id' => nic }
-              nic_id
-            end
-          }
+          server_def[:nics] = locate_config_value(:network_ids).map do |nic|
+            nic_id = { 'net_id' => nic }
+            nic_id
+          end
         end
+        Chef::Log.debug("server_def is: #{server_def}")
 
         Chef::Log.debug("Name #{node_name}")
         Chef::Log.debug("Availability Zone #{locate_config_value(:availability_zone)}")
@@ -372,15 +364,26 @@ class Chef
         Chef::Log.debug("Public IP Address actual: #{primary_public_ip_address(server.addresses)}") if primary_public_ip_address(server.addresses)
 
         # private_network means bootstrap_network = 'private'
-        config[:bootstrap_network] = 'private' if config[:private_network]
+        config[:bootstrap_network] = private_network['name'] if config[:private_network]
 
-        unless config[:network] # --no-network
+        # change bootstrap_network to name of public_network if set to 'public'
+        config[:bootstrap_network] = public_network['name'] if config[:bootstrap_network] == 'public' && public_network['name'] != 'public'
+        Chef::Log.debug("Bootstrap Network is now #{config[:bootstrap_network]}")
+
+        unless locate_config_value(:network) # --no-network
           bootstrap_ip_address = primary_public_ip_address(server.addresses) ||
             primary_private_ip_address(server.addresses) ||
             server.addresses[1][0]['addr']
           Chef::Log.debug("No Bootstrap Network: #{config[:bootstrap_network]}")
         else
-          bootstrap_ip_address = primary_network_ip_address(server.addresses, config[:bootstrap_network])
+          # when using a floating ip, server.addresses will include that IP in a
+          # network named 'public' no matter what the name of the network it 
+          # came from is actually named, so we'll try 'public' explicitly.
+          # Also if no public IP is found we'll try a private IP.
+          bootstrap_ip_address = primary_network_ip_address(server.addresses, config[:bootstrap_network]) ||
+            primary_network_ip_address(server.addresses, 'public') ||
+            primary_network_ip_address(server.addresses, 'private') ||
+            primary_network_ip_address(server.addresses, private_network['name'])
           Chef::Log.debug("Bootstrap Network: #{config[:bootstrap_network]}")
         end
 
